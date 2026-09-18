@@ -1,0 +1,80 @@
+@startuml
+!define table(x) class x << (T,#FFAAAA) >>
+!define primary_key(x) <u>x</u>
+!define foreign_key(x) <i>x</i>
+
+table(restaurants) {
+    <u>id</u> : BIGSERIAL PK
+    name : VARCHAR(255) NOT NULL
+    address : VARCHAR(500) NOT NULL
+    phone : VARCHAR(20)
+    opening_time : TIME NOT NULL DEFAULT '09:00:00'
+    closing_time : TIME NOT NULL DEFAULT '22:00:00'
+    is_active : BOOLEAN DEFAULT true
+    created_at : TIMESTAMPTZ DEFAULT NOW()
+}
+
+table(menu_items) {
+    <u>id</u> : BIGSERIAL PK
+    <i>restaurant_id</i> : BIGINT FK
+    name : VARCHAR(255) NOT NULL
+    description : TEXT
+    price : DECIMAL(10,2) NOT NULL CHECK (price >= 0)
+    is_available : BOOLEAN DEFAULT true
+    created_at : TIMESTAMPTZ DEFAULT NOW()
+}
+
+table(orders) {
+    <u>id</u> : BIGSERIAL PK
+    <i>restaurant_id</i> : BIGINT FK
+    user_id : BIGINT NOT NULL
+    address : VARCHAR(500) NOT NULL
+    total_price : DECIMAL(10,2) NOT NULL CHECK (total_price >= 0)
+    status : VARCHAR(20) NOT NULL DEFAULT 'new'
+    estimated_delivery_at : TIMESTAMPTZ
+    created_at : TIMESTAMPTZ DEFAULT NOW()
+    updated_at : TIMESTAMPTZ DEFAULT NOW()
+}
+
+table(order_items) {
+    <u>id</u> : BIGSERIAL PK
+    <i>order_id</i> : BIGINT FK
+    <i>menu_item_id</i> : BIGINT FK
+    quantity : INT NOT NULL CHECK (quantity > 0)
+    price_at_time : DECIMAL(10,2) NOT NULL CHECK (price_at_time >= 0)
+}
+
+restaurants ||--o{ menu_items : "has"
+restaurants ||--o{ orders : "receives"
+orders ||--|{ order_items : "contains"
+menu_items ||--o{ order_items : "referenced"
+
+' Индексы
+note right of orders
+  <b>Индексы для скорости:</b>
+  * idx_orders_restaurant_status (restaurant_id, status)
+  * idx_orders_created_at_desc (created_at DESC)
+  * idx_orders_user_id (user_id)
+end note
+
+note right of menu_items
+  * idx_menu_items_restaurant_id (restaurant_id)
+end note
+
+' Примечание по безопасности
+note bottom of restaurants
+  <b>Безопасность:</b>
+  address ограничен 500 символами (как в ресторанах, так и в заказах).
+  В приложении также выполняется валидация и лимит размера тела запроса.
+  Все запросы параметризованы – защита от SQL-инъекций.
+end note
+
+' Примечание о времени работы
+note left of restaurants
+  <b>Время работы:</b>
+  opening_time и closing_time хранятся в формате TIME (HH:MM:SS) без часового пояса.
+  Ожидается, что closing_time > opening_time (проверка через CHECK в БД).
+  При создании заказа проверяется, что текущее время попадает в интервал [opening_time, closing_time].
+  Для круглосуточных заведений можно установить opening_time = '00:00:00', closing_time = '23:59:59'.
+end note
+@enduml

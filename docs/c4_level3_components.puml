@@ -1,0 +1,17 @@
+@startuml
+!include <C4/C4_Component>
+
+Container_Boundary(core_internal, "Core API") {
+    Component(handlers, "HTTP Handlers", "net/http", "Принимает запросы, валидирует JSON, вызывает сервисы")
+    Component(services, "Services (Use Cases)", "Go", "Содержит бизнес-логику: создание заказа, статус-машина, расчет суммы")
+    Component(repositories, "Repositories", "Go + pgx", "CRUD операции с БД, работа с транзакциями, пагинация")
+}
+
+ContainerDb_Ext(db, "База данных", "PostgreSQL", "Таблицы: orders, menu_items, restaurants")
+
+Rel(handlers, services, "Вызов методов", "Зависимость")
+Rel(services, repositories, "Вызов методов", "Зависимость")
+Rel(repositories, db, "SQL-запросы", "TCP")
+
+SHOW_LEGEND()
+@enduml

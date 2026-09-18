@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: Авито.Кухня Core API
+  description: |
+    API для сервиса доставки еды. 
+    Публичная часть – для покупателей (заказ, просмотр меню).
+    Внутренняя часть – для заведений (управление заказами и меню).
+  version: 1.0.0
+  contact:
+    name: Support
+    url: https://avito.ru
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Локальный сервер для разработки
+
+tags:
+  - name: Публичные
+    description: Эндпоинты для покупателей
+  - name: Внутренние
+    description: Эндпоинты для заведений (интеграция)
+
+paths:
+  # ---------- ПУБЛИЧНЫЕ ЭНДПОИНТЫ ----------
+  /restaurants:
+    get:
+      tags: [Публичные]
+      summary: Получить список заведений
+      description: Поддерживает пагинацию (cursor-based) и фильтрацию по кухне
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          description: ID последнего элемента из предыдущего запроса (для следующей страницы)
+          schema:
+            type: integer
+            minimum: 1
+        - name: cuisine
+          in: query
+          description: Фильтр по типу кухни (например, "итальянская", "японская")
+          schema:
+            type: string
+            maxLength: 50
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Restaurant'
+                  next_cursor:
+                    type: integer
+                    description: ID следующего элемента для пагинации (null, если больше нет)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /restaurants/{restaurantId}/menu:
+    get:
+      tags: [Публичные]
+      summary: Получить меню заведения
+      parameters:
+        - name: restaurantId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: is_available
+          in: query
+          description: Фильтр только по доступным позициям
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Список позиций меню
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MenuItem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders:
+    post:
+      tags: [Публичные]
+      summary: Создать новый заказ
+      description: Оформляет заказ. Все позиции должны быть в наличии, иначе вернёт ошибку.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Заказ успешно создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Ресторан или позиция меню не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Конфликт (например, товара нет в наличии)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orders/{orderId}:
+    get:
+      tags: [Публичные]
+      summary: Получить детали заказа и его статус
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Детали заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Публичные]
+      summary: Отменить заказ
+      description: Возможно только если статус `new` или `collected` (до начала приготовления)
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Заказ отменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Нельзя отменить заказ (уже готовится или доставляется)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------- ВНУТРЕННИЕ ЭНДПОИНТЫ (для ресторанов) ----------
+  /internal/orders:
+    get:
+      tags: [Внутренние]
+      summary: Получить заказы ресторана по статусу
+      description: Используется для опроса (polling) со стороны ресторана.
+      parameters:
+        - name: restaurant_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: status
+          in: query
+          description: Фильтр по статусу (по умолчанию new)
+          schema:
+            type: string
+            enum: [new, collected, cooking, ready]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 50
+      responses:
+        '200':
+          description: Список заказов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /internal/orders/{orderId}/status:
+    patch:
+      tags: [Внутренние]
+      summary: Обновить статус заказа
+      description: |
+        Заведение сообщает о смене статуса.
+        Допустимые переходы:
+        - new → collected
+        - collected → cooking
+        - cooking → ready
+        - ready → delivering (замокано, т.к. доставка не в MVP)
+        - любой → cancelled (если заказ ещё не готов)
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [collected, cooking, ready, delivering, cancelled]
+      responses:
+        '200':
+          description: Статус обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Недопустимый переход статуса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /internal/menu:
+    post:
+      tags: [Внутренние]
+      summary: Добавить позицию в меню
+      description: Используется демо-сервисом для инициализации меню.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMenuItemRequest'
+      responses:
+        '201':
+          description: Позиция создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Ресторан не найден
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    Restaurant:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Кафе у дома"
+        address:
+          type: string
+          example: "ул. Ленина, 10"
+        phone:
+          type: string
+          example: "+7(999)123-45-67"
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-01-01T12:00:00Z"
+
+    MenuItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 101
+        restaurant_id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Пицца Маргарита"
+        description:
+          type: string
+          example: "Классическая пицца с томатным соусом и сыром"
+        price:
+          type: number
+          format: double
+          example: 550.00
+        is_available:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateMenuItemRequest:
+      type: object
+      required: [restaurant_id, name, price]
+      properties:
+        restaurant_id:
+          type: integer
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        price:
+          type: number
+          minimum: 0
+        is_available:
+          type: boolean
+          default: true
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+        restaurant_id:
+          type: integer
+        user_id:
+          type: integer
+        address:
+          type: string
+        total_price:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [new, collected, cooking, ready, delivering, delivered, cancelled]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      properties:
+        menu_item_id:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+        price_at_time:
+          type: number
+          format: double
+        name:   # дублируем для удобства (необязательно в БД, но можно добавить)
+          type: string
+
+    CreateOrderRequest:
+      type: object
+      required: [restaurant_id, address, items]
+      properties:
+        restaurant_id:
+          type: integer
+          example: 1
+        address:
+          type: string
+          example: "ул. Пушкина, 15, кв. 5"
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [menu_item_id, quantity]
+            properties:
+              menu_item_id:
+                type: integer
+              quantity:
+                type: integer
+                minimum: 1
+                example: 2
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: "ORDER_NOT_FOUND"
+        message:
+          type: string
+          example: "Заказ с указанным ID не найден"
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос (ошибка валидации)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

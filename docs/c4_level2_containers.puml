@@ -1,0 +1,17 @@
+@startuml
+!include <C4/C4_Container>
+
+Person(web_user, "Клиент", "Заказывает еду через веб-сайт")
+Person(rest_worker, "Менеджер ресторана", "Управляет заказами и меню")
+
+System_Boundary(avito_kitchen, "Авито.Кухня") {
+    Container(api_gateway, "Core API", "Go + net/http", "Основной сервер. Управляет заказами, меню, статусами. Stateless")
+    ContainerDb(postgres, "База данных", "PostgreSQL 15", "Хранит заказы, меню, рестораны. С индексами для быстрых выборок")
+    Container(demo_rest, "Сервис-Заведение (Demo)", "Go", "Эмулирует работу ресторана. Опрашивает Core API")
+}
+
+Rel(web_user, api_gateway, "REST API (JSON)", "HTTPS")
+Rel(rest_worker, api_gateway, "REST API (Закрытый доступ)", "HTTPS")
+Rel(api_gateway, postgres, "pgx (TCP)", "SQL")
+Rel(demo_rest, api_gateway, "REST API (Integration)", "HTTP (внутренний)")
+@enduml
